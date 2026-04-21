@@ -1,0 +1,43 @@
+{
+  "name": "sincewhen",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "postinstall": "npm rebuild better-sqlite3 --build-from-source=false --target=24.11.1 --runtime=node",
+    "dev": "concurrently -n web,worker -c yellow,magenta \"npm:dev:web\" \"npm:dev:worker\"",
+    "dev:web": "next dev",
+    "dev:worker": "tsx watch src/worker.ts",
+    "build": "next build",
+    "start": "concurrently -n web,worker -c yellow,magenta \"npm:start:web\" \"npm:start:worker\"",
+    "start:web": "next start",
+    "start:worker": "tsx src/worker.ts",
+    "seed": "tsx src/db/seed.ts",
+    "lint": "eslint"
+  },
+  "dependencies": {
+    "better-sqlite3": "^12.4.1",
+    "cheerio": "^1.1.2",
+    "concurrently": "^9.2.1",
+    "date-fns": "^4.1.0",
+    "date-fns-tz": "^3.2.0",
+    "next": "16.2.4",
+    "node-cron": "^4.2.1",
+    "react": "19.2.4",
+    "react-dom": "19.2.4",
+    "tsx": "^4.20.7",
+    "undici": "^7.18.2",
+    "zod": "^4.2.0"
+  },
+  "devDependencies": {
+    "@tailwindcss/postcss": "^4",
+    "@types/better-sqlite3": "^7.6.13",
+    "@types/node": "^20",
+    "@types/node-cron": "^3.0.11",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "eslint": "^9",
+    "eslint-config-next": "16.2.4",
+    "tailwindcss": "^4",
+    "typescript": "^5"
+  }
+}

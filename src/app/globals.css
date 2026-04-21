@@ -1,0 +1,273 @@
+@import "tailwindcss";
+
+@theme {
+  --color-bone: #0d0d0d;
+  --color-panel: #1a1a1a;
+  --color-hazard: #f4c300;
+  --color-hazard-dim: #b88f00;
+  --color-caution: #c8102e;
+  --color-tally: #ff7a1a;
+  --color-circus: #e23ec9;
+  --color-circus-ink: #2a0a24;
+  --color-paper: #f1e9d2;
+  --color-ink: #141414;
+
+  --font-sans: var(--font-inter), system-ui, -apple-system, "Segoe UI", Roboto,
+    sans-serif;
+  --font-display: var(--font-dm-serif), Georgia, serif;
+  --font-stencil: var(--font-bebas), "Arial Narrow", sans-serif;
+  --font-mono: var(--font-mono), "JetBrains Mono", ui-monospace, monospace;
+}
+
+html,
+body {
+  background: var(--color-bone);
+  color: var(--color-paper);
+  font-family: var(--font-sans);
+  font-size: 16px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+  font-feature-settings: "ss01", "cv11";
+  overscroll-behavior: none;
+}
+
+::selection {
+  background: var(--color-hazard);
+  color: var(--color-bone);
+}
+
+/* ---------- hazard stripes ---------- */
+.hazard-stripes {
+  background-image: repeating-linear-gradient(
+    -45deg,
+    var(--color-hazard) 0 18px,
+    var(--color-bone) 18px 36px
+  );
+}
+
+/* Yellow-and-orange tally stripe for yearly "running tally" tiles so they
+   read instantly differently from the days-since plaques. */
+.tally-stripes {
+  background-image: repeating-linear-gradient(
+    -45deg,
+    var(--color-tally) 0 10px,
+    #1a0f05 10px 20px
+  );
+}
+
+/* Purple-and-black circus stripe for the joke tile. */
+.circus-stripes {
+  background-image: repeating-linear-gradient(
+    -45deg,
+    var(--color-circus) 0 14px,
+    var(--color-circus-ink) 14px 28px
+  );
+}
+
+/* Board-tile title (the damning noun). Replaces the old dim subtitle that
+   lived under the digits. Designed to read at-a-glance without squinting. */
+.tile-title {
+  font-family: var(--font-sans);
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  line-height: 1.15;
+  font-size: clamp(1.05rem, 1.8vw, 1.35rem);
+}
+
+.tile-kicker {
+  font-family: var(--font-stencil);
+  letter-spacing: 0.32em;
+  font-size: 11px;
+}
+
+.counter-meta {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+/* ---------- film grain ---------- */
+.grain::after {
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 100;
+  opacity: 0.06;
+  mix-blend-mode: overlay;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='160' height='160'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/></filter><rect width='100%' height='100%' filter='url(%23n)' opacity='0.9'/></svg>");
+}
+
+/* ---------- stamp ---------- */
+.stamp-offline {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+}
+.stamp-offline > span {
+  font-family: var(--font-stencil);
+  font-size: 1.6rem;
+  letter-spacing: 0.2em;
+  color: var(--color-caution);
+  border: 3px solid var(--color-caution);
+  padding: 0.15em 0.6em;
+  transform: rotate(-8deg);
+  opacity: 0.55;
+  text-shadow: 0 0 0 currentColor;
+}
+
+/* ---------- rivet dot ---------- */
+.rivet {
+  position: absolute;
+  width: 10px;
+  height: 10px;
+  border-radius: 999px;
+  background: radial-gradient(
+    circle at 35% 30%,
+    #6d6d6d 0%,
+    #2a2a2a 55%,
+    #0b0b0b 100%
+  );
+  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.6);
+}
+
+/* ---------- split-flap ---------- */
+.flap {
+  perspective: 400px;
+}
+.flap-card {
+  position: relative;
+  width: 1ch;
+  height: 1.15em;
+  font-family: var(--font-stencil);
+  line-height: 1;
+  color: var(--color-paper);
+  background: #141414;
+  border-radius: 0.12em;
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.04),
+    inset 0 0 0 1px rgba(255, 255, 255, 0.02);
+  overflow: hidden;
+}
+.flap-half {
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 50%;
+  display: flex;
+  justify-content: center;
+  overflow: hidden;
+  background: #141414;
+}
+.flap-half.top {
+  top: 0;
+  align-items: flex-end;
+}
+.flap-half.bottom {
+  bottom: 0;
+  align-items: flex-start;
+  color: var(--color-paper);
+  border-top: 1px solid rgba(0, 0, 0, 0.7);
+}
+.flap-half.top > span {
+  transform: translateY(50%);
+}
+.flap-half.bottom > span {
+  transform: translateY(-50%);
+}
+
+.flap-flip-top {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 50%;
+  display: flex;
+  justify-content: center;
+  align-items: flex-end;
+  overflow: hidden;
+  background: #141414;
+  transform-origin: bottom;
+  backface-visibility: hidden;
+  animation: flap-top 0.45s ease-in forwards;
+}
+.flap-flip-top > span {
+  transform: translateY(50%);
+}
+.flap-flip-bottom {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  height: 50%;
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+  overflow: hidden;
+  background: #141414;
+  transform-origin: top;
+  backface-visibility: hidden;
+  transform: rotateX(90deg);
+  animation: flap-bottom 0.45s 0.45s ease-out forwards;
+  border-top: 1px solid rgba(0, 0, 0, 0.7);
+}
+.flap-flip-bottom > span {
+  transform: translateY(-50%);
+}
+
+@keyframes flap-top {
+  0% {
+    transform: rotateX(0);
+  }
+  100% {
+    transform: rotateX(-90deg);
+  }
+}
+@keyframes flap-bottom {
+  0% {
+    transform: rotateX(90deg);
+  }
+  100% {
+    transform: rotateX(0);
+  }
+}
+
+/* ---------- ticker ---------- */
+.ticker-track {
+  display: inline-flex;
+  white-space: nowrap;
+  animation: ticker-scroll 80s linear infinite;
+}
+@keyframes ticker-scroll {
+  from {
+    transform: translateX(0);
+  }
+  to {
+    transform: translateX(-50%);
+  }
+}
+
+/* ---------- paper page ---------- */
+.paper {
+  background:
+    radial-gradient(
+      circle at 0% 0%,
+      rgba(0, 0, 0, 0.06) 0%,
+      transparent 40%
+    ),
+    radial-gradient(
+      circle at 100% 100%,
+      rgba(0, 0, 0, 0.05) 0%,
+      transparent 40%
+    ),
+    var(--color-paper);
+  color: var(--color-ink);
+}
+
+/* ---------- typewriter rule ---------- */
+.type-rule {
+  border-top: 1px dashed rgba(0, 0, 0, 0.35);
+}

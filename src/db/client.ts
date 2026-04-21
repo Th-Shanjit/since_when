@@ -52,8 +52,13 @@ export function getPool(): Pool {
 export function ensureDb(): Promise<void> {
   if (!ready) {
     ready = (async () => {
-      const p = getPool();
-      await applySchema(p);
+      try {
+        const p = getPool();
+        await applySchema(p);
+      } catch (err) {
+        ready = null;
+        throw err;
+      }
     })();
   }
   return ready;

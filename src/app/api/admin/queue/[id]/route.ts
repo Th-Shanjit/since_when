@@ -49,9 +49,15 @@ export async function POST(
 
   // Atomic: mark decision + process the event inside one txn so a crash
   // in the middle cannot leave the queue approved but the counter untouched.
+  // Log/emit side effects run only after COMMIT (via onAfterCommit).
+  const afterCommit: (() => void)[] = [];
   const result = await tx(async (db) => {
     await decidePending(numId, "approved", "admin", db);
-    return await processCounter(row.counter_id, eventData, row.scope, { db });
+    return await processCounter(row.counter_id, eventData, row.scope, {
+      db,
+      onAfterCommit: (fn) => afterCommit.push(fn),
+    });
   });
+  for (const fn of afterCommit) fn();
   return json({ ok: true, result });
 }

@@ -40,6 +40,17 @@ export const YEAR_START_ISO = "2026-01-01T00:00:00Z";
 export type ProcessCounterOptions = {
   /** When set (e.g. admin approval txn), all writes use this client — no nested txn. */
   db?: Sql;
+  /**
+   * When `db` is set and the engine schedules log/emit side effects, they are
+   * passed here instead of running immediately so the outer transaction can
+   * commit first. Required whenever `db` is used and a mutation succeeds.
+   */
+  onAfterCommit?: (fn: () => void) => void;
+};
+
+type RunOutcome = {
+  result: ProcessResult;
+  afterCommit: (() => void) | null;
 };
 
 // Unified entry point. Every reset/increment in the system funnels through
@@ -52,40 +63,51 @@ export async function processCounter(
   scope: string | null = null,
   opts?: ProcessCounterOptions,
 ): Promise<ProcessResult> {
-  const outer = opts?.db;
-  const def = COUNTERS_BY_ID[counterDefId];
   const id = scopedId(counterDefId, scope);
+  const def = COUNTERS_BY_ID[counterDefId];
 
   if (!e.isValidEvent) {
     return { action: "skip", counter_id: id, scope, reason: "invalid" };
   }
-  if (await eventFingerprintExists(e.fingerprint, outer)) {
-    return { action: "skip", counter_id: id, scope, reason: "dup" };
-  }
 
-  const c = await getCounter(id, outer);
-  if (!c) {
-    return { action: "skip", counter_id: id, scope, reason: "unknown_counter" };
-  }
-  if (!def) {
-    return { action: "skip", counter_id: id, scope, reason: "unknown_counter" };
-  }
-  if (def.kind === "special") {
-    return { action: "skip", counter_id: id, scope, reason: "not_resettable" };
-  }
-  if (c.status === "frozen") {
-    return { action: "skip", counter_id: id, scope, reason: "frozen" };
-  }
-
-  // -------------------- yearly-kind: increment path --------------------
-  if (def.kind === "yearly") {
-    if (parseIso(e.eventTime).getTime() < parseIso(YEAR_START_ISO).getTime()) {
-      return { action: "skip", counter_id: id, scope, reason: "older" };
+  const runAll = async (db: Sql): Promise<RunOutcome> => {
+    if (await eventFingerprintExists(e.fingerprint, db)) {
+      return {
+        result: { action: "skip", counter_id: id, scope, reason: "dup" },
+        afterCommit: null,
+      };
     }
-    const primary = e.sources[0] ?? "";
-    let newCount = 0;
 
-    const runYearly = async (db: Sql) => {
+    const c = await getCounter(id, db);
+    if (!c || !def) {
+      return {
+        result: { action: "skip", counter_id: id, scope, reason: "unknown_counter" },
+        afterCommit: null,
+      };
+    }
+    if (def.kind === "special") {
+      return {
+        result: { action: "skip", counter_id: id, scope, reason: "not_resettable" },
+        afterCommit: null,
+      };
+    }
+    if (c.status === "frozen") {
+      return {
+        result: { action: "skip", counter_id: id, scope, reason: "frozen" },
+        afterCommit: null,
+      };
+    }
+
+    // -------------------- yearly-kind: increment path --------------------
+    if (def.kind === "yearly") {
+      if (parseIso(e.eventTime).getTime() < parseIso(YEAR_START_ISO).getTime()) {
+        return {
+          result: { action: "skip", counter_id: id, scope, reason: "older" },
+          afterCommit: null,
+        };
+      }
+      const primary = e.sources[0] ?? "";
+
       await insertEvent(
         {
           counter_id: id,
@@ -97,7 +119,7 @@ export async function processCounter(
         },
         db,
       );
-      newCount = await countEventsSince(id, YEAR_START_ISO, db);
+      const newCount = await countEventsSince(id, YEAR_START_ISO, db);
       await setCounterPrevValueWithClient(
         db,
         id,
@@ -109,41 +131,47 @@ export async function processCounter(
         label: e.label,
         source: primary,
       });
-    };
 
-    if (outer) {
-      await runYearly(outer);
-    } else {
-      await tx(runYearly);
+      const afterCommit = () => {
+        log.info("yearly_increment", {
+          counter_id: id,
+          count: newCount,
+          label: e.label,
+        });
+        emitCounterChange({
+          counterId: id,
+          counterDefId,
+          scope,
+          kind: "yearly-increment",
+          eventTime: e.eventTime,
+          label: e.label,
+          source: primary,
+          value: newCount,
+        });
+      };
+      return {
+        result: { action: "increment", counter_id: id, scope, count: newCount },
+        afterCommit,
+      };
     }
 
-    log.info("yearly_increment", { counter_id: id, count: newCount, label: e.label });
-    emitCounterChange({
-      counterId: id,
-      counterDefId,
-      scope,
-      kind: "yearly-increment",
-      eventTime: e.eventTime,
-      label: e.label,
-      source: primary,
-      value: newCount,
-    });
-    return { action: "increment", counter_id: id, scope, count: newCount };
-  }
-
-  // -------------------- auto/queue: reset path --------------------
-  if (c.last_event_at) {
-    if (parseIso(e.eventTime).getTime() <= parseIso(c.last_event_at).getTime()) {
-      return { action: "skip", counter_id: id, scope, reason: "older" };
+    // -------------------- auto/queue: reset path --------------------
+    if (c.last_event_at) {
+      if (parseIso(e.eventTime).getTime() <= parseIso(c.last_event_at).getTime()) {
+        return {
+          result: { action: "skip", counter_id: id, scope, reason: "older" },
+          afterCommit: null,
+        };
+      }
+      if (hoursBetween(e.eventTime, c.last_event_at) < COOLDOWN_HOURS) {
+        return {
+          result: { action: "skip", counter_id: id, scope, reason: "cooldown" },
+          afterCommit: null,
+        };
+      }
     }
-    if (hoursBetween(e.eventTime, c.last_event_at) < COOLDOWN_HOURS) {
-      return { action: "skip", counter_id: id, scope, reason: "cooldown" };
-    }
-  }
 
-  const primarySource = e.sources[0] ?? "";
-
-  const runReset = async (db: Sql) => {
+    const primarySource = e.sources[0] ?? "";
     await insertEvent(
       {
         counter_id: id,
@@ -161,23 +189,40 @@ export async function processCounter(
       label: e.label,
       source: primarySource,
     });
+
+    const afterCommit = () => {
+      log.info("reset", { counter_id: id, label: e.label });
+      emitCounterChange({
+        counterId: id,
+        counterDefId,
+        scope,
+        kind: "reset",
+        eventTime: e.eventTime,
+        label: e.label,
+        source: primarySource,
+      });
+    };
+    return {
+      result: { action: "reset", counter_id: id, scope },
+      afterCommit,
+    };
   };
 
-  if (outer) {
-    await runReset(outer);
-  } else {
-    await tx(runReset);
+  const { result, afterCommit } = opts?.db
+    ? await runAll(opts.db)
+    : await tx(runAll);
+
+  if (afterCommit) {
+    if (!opts?.db) {
+      afterCommit();
+    } else if (opts.onAfterCommit) {
+      opts.onAfterCommit(afterCommit);
+    } else {
+      throw new Error(
+        "processCounter: opts.db requires opts.onAfterCommit when the event mutates state",
+      );
+    }
   }
 
-  log.info("reset", { counter_id: id, label: e.label });
-  emitCounterChange({
-    counterId: id,
-    counterDefId,
-    scope,
-    kind: "reset",
-    eventTime: e.eventTime,
-    label: e.label,
-    source: primarySource,
-  });
-  return { action: "reset", counter_id: id, scope };
+  return result;
 }

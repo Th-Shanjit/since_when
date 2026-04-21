@@ -17,7 +17,12 @@ export function startAlertsWorker(): void {
   started = true;
   onCounterChange((e) => {
     // Fire-and-forget: listener can't block engine path.
-    void dispatch(e);
+    void dispatch(e).catch((err) => {
+      log.error("alerts_dispatch_fatal_error", {
+        counter_id: e.counterId,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    });
   });
   log.info("alerts_worker_started", {});
 }

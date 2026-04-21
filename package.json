@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "postinstall": "npm rebuild better-sqlite3 --build-from-source=false --target=24.11.1 --runtime=node",
+    "postinstall": "npm rebuild better-sqlite3",
     "dev": "concurrently -n web,worker -c yellow,magenta \"npm:dev:web\" \"npm:dev:worker\"",
     "dev:web": "next dev",
     "dev:worker": "tsx watch src/worker.ts",

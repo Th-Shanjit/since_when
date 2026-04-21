@@ -32,8 +32,8 @@ export const examLeak: CounterModule = {
     for (const g of groups) {
       const [exam, date] = g.bucketKey.split("||");
       const fingerprint = fp.examDate(exam, date);
-      if (pendingFingerprintExists(fingerprint)) continue;
-      insertPendingEvent({
+      if (await pendingFingerprintExists(fingerprint)) continue;
+      await insertPendingEvent({
         counter_id: "examLeak",
         scope: exam,
         candidate_event_time: g.publishedAt,

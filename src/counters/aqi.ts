@@ -98,7 +98,7 @@ export const aqi: CounterModule = {
     // result bubbles back as the representative return for the runner.
     let last: CounterRunResult = { kind: "none", reason: "no_city_reset" };
     for (const { city, event } of events) {
-      const result = processCounter("aqi", event, city);
+      const result = await processCounter("aqi", event, city);
       last = { kind: "processed", result };
     }
     return last;

@@ -87,7 +87,7 @@ export const internetOutage: CounterModule = {
     // Baseline ring buffers live on the unscoped "internetOutage" row so
     // every service shares a single state bag. This keeps the legacy
     // seed row useful after migration.
-    const baseRow = getCounter("internetOutage");
+    const baseRow = await getCounter("internetOutage");
     const state: BaselineState = baseRow?.baseline_json
       ? (JSON.parse(baseRow.baseline_json) as BaselineState)
       : {};
@@ -110,12 +110,12 @@ export const internetOutage: CounterModule = {
       if (event) {
         last = {
           kind: "processed",
-          result: processCounter("internetOutage", event, svc.label),
+          result: await processCounter("internetOutage", event, svc.label),
         };
       }
     }
 
-    setCounterBaseline("internetOutage", JSON.stringify(state));
+    await setCounterBaseline("internetOutage", JSON.stringify(state));
     return last;
   },
 };

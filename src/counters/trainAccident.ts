@@ -35,8 +35,8 @@ export const trainAccident: CounterModule = {
         g.bucketKey.split("||")[0],
         g.bucketKey.split("||")[1],
       );
-      if (pendingFingerprintExists(fingerprint)) continue;
-      insertPendingEvent({
+      if (await pendingFingerprintExists(fingerprint)) continue;
+      await insertPendingEvent({
         counter_id: "trainAccident",
         scope: null,
         candidate_event_time: g.publishedAt,

@@ -44,7 +44,7 @@ export function BoardClient({ counters }: { counters: BoardTile[] }) {
     const defId = u.searchParams.get("open");
     if (!defId) return;
     const scope = u.searchParams.get("scope");
-    setOpen({ defId, scope });
+    queueMicrotask(() => setOpen({ defId, scope }));
   }, []);
 
   return (
@@ -61,7 +61,12 @@ export function BoardClient({ counters }: { counters: BoardTile[] }) {
       </div>
 
       {open && (
-        <CounterModal defId={open.defId} scope={open.scope} onClose={onClose} />
+        <CounterModal
+          key={`${open.defId}:${open.scope ?? ""}`}
+          defId={open.defId}
+          scope={open.scope}
+          onClose={onClose}
+        />
       )}
     </>
   );

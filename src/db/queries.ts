@@ -1,9 +1,12 @@
-import { getDb } from "./client";
+import { ensureDb, getPool } from "./client";
 
-// All counter rows are identified by a composite "scoped id": the def id
-// ("aqi") when the counter isn't scoped, or "<defId>#<scope>" when it is
-// (e.g. "aqi#Delhi"). The `counter_def_id` and `scope` columns are
-// denormalised copies of those two pieces so range queries stay trivial.
+/** Pool or transaction client — anything that can run parameterized SQL. */
+export type Sql = {
+  query: (
+    text: string,
+    params?: unknown[],
+  ) => Promise<{ rows: unknown[]; rowCount?: number | null }>;
+};
 
 // ---------- types ----------
 
@@ -33,7 +36,7 @@ export type EventRow = {
   scope: string | null;
   event_time: string;
   label: string;
-  sources: string; // JSON array string
+  sources: string;
   fingerprint: string;
   created_at: string;
 };
@@ -62,29 +65,43 @@ export type AlertSubscriptionRow = {
   created_at: string;
 };
 
+function pgUniqueViolation(err: unknown): boolean {
+  const e = err as { code?: string };
+  return e.code === "23505";
+}
+
 // ---------- counters ----------
 
-export function listCounters(): CounterRow[] {
-  return getDb().prepare("SELECT * FROM counters ORDER BY id").all() as CounterRow[];
+export async function listCounters(): Promise<CounterRow[]> {
+  await ensureDb();
+  const r = await getPool().query(
+    "SELECT * FROM counters ORDER BY id",
+  );
+  return r.rows as CounterRow[];
 }
 
-export function getCounter(id: string): CounterRow | undefined {
-  return getDb().prepare("SELECT * FROM counters WHERE id = ?").get(id) as
-    | CounterRow
-    | undefined;
+export async function getCounter(
+  id: string,
+  db?: Sql,
+): Promise<CounterRow | undefined> {
+  await ensureDb();
+  const sql = db ?? getPool();
+  const r = await sql.query("SELECT * FROM counters WHERE id = $1", [id]);
+  return (r.rows[0] as CounterRow | undefined) ?? undefined;
 }
 
-export function listCountersByDef(defId: string): CounterRow[] {
-  return getDb()
-    .prepare(
-      `SELECT * FROM counters
-        WHERE counter_def_id = ? OR id = ?
-        ORDER BY scope IS NULL DESC, scope ASC`,
-    )
-    .all(defId, defId) as CounterRow[];
+export async function listCountersByDef(defId: string): Promise<CounterRow[]> {
+  await ensureDb();
+  const r = await getPool().query(
+    `SELECT * FROM counters
+      WHERE counter_def_id = $1 OR id = $2
+      ORDER BY (scope IS NULL) DESC, scope ASC`,
+    [defId, defId],
+  );
+  return r.rows as CounterRow[];
 }
 
-export function upsertCounter(c: {
+export async function upsertCounter(c: {
   id: string;
   counter_def_id: string | null;
   scope: string | null;
@@ -99,284 +116,319 @@ export function upsertCounter(c: {
   baseline_json?: string | null;
   status?: "live" | "frozen";
   consecutive_failures?: number;
-}) {
+}): Promise<void> {
+  await ensureDb();
   const now = new Date().toISOString();
-  getDb()
-    .prepare(
-      `INSERT INTO counters
-         (id, counter_def_id, scope, title, subtitle, kind,
-          first_event_at, last_event_at, last_event_label,
-          last_event_source, previous_value_json, baseline_json, status,
-          consecutive_failures, updated_at)
-       VALUES
-         (@id, @counter_def_id, @scope, @title, @subtitle, @kind,
-          @first_event_at, @last_event_at,
-          @last_event_label, @last_event_source, @previous_value_json,
-          @baseline_json, @status, @consecutive_failures, @updated_at)
-       ON CONFLICT(id) DO UPDATE SET
-         counter_def_id = excluded.counter_def_id,
-         scope = excluded.scope,
-         title = excluded.title,
-         subtitle = excluded.subtitle,
-         kind = excluded.kind,
-         updated_at = excluded.updated_at`,
-    )
-    .run({
-      id: c.id,
-      counter_def_id: c.counter_def_id,
-      scope: c.scope,
-      title: c.title,
-      subtitle: c.subtitle ?? null,
-      kind: c.kind,
-      first_event_at: c.first_event_at ?? null,
-      last_event_at: c.last_event_at ?? null,
-      last_event_label: c.last_event_label ?? null,
-      last_event_source: c.last_event_source ?? null,
-      previous_value_json: c.previous_value_json ?? null,
-      baseline_json: c.baseline_json ?? null,
-      status: c.status ?? "live",
-      consecutive_failures: c.consecutive_failures ?? 0,
-      updated_at: now,
-    });
+  await getPool().query(
+    `INSERT INTO counters
+       (id, counter_def_id, scope, title, subtitle, kind,
+        first_event_at, last_event_at, last_event_label,
+        last_event_source, previous_value_json, baseline_json, status,
+        consecutive_failures, updated_at)
+     VALUES
+       ($1, $2, $3, $4, $5, $6,
+        $7, $8, $9, $10, $11, $12, $13, $14, $15)
+     ON CONFLICT (id) DO UPDATE SET
+       counter_def_id = EXCLUDED.counter_def_id,
+       scope = EXCLUDED.scope,
+       title = EXCLUDED.title,
+       subtitle = EXCLUDED.subtitle,
+       kind = EXCLUDED.kind,
+       updated_at = EXCLUDED.updated_at`,
+    [
+      c.id,
+      c.counter_def_id,
+      c.scope,
+      c.title,
+      c.subtitle ?? null,
+      c.kind,
+      c.first_event_at ?? null,
+      c.last_event_at ?? null,
+      c.last_event_label ?? null,
+      c.last_event_source ?? null,
+      c.previous_value_json ?? null,
+      c.baseline_json ?? null,
+      c.status ?? "live",
+      c.consecutive_failures ?? 0,
+      now,
+    ],
+  );
 }
 
-export function updateCounterOnReset(p: {
+export async function updateCounterOnReset(p: {
   id: string;
   event_time: string;
   label: string;
   source: string;
-}) {
+}): Promise<void> {
+  await ensureDb();
   const now = new Date().toISOString();
-  getDb()
-    .prepare(
-      `UPDATE counters
-         SET last_event_at = @event_time,
-             last_event_label = @label,
-             last_event_source = @source,
-             status = 'live',
-             consecutive_failures = 0,
-             updated_at = @updated_at
-       WHERE id = @id`,
-    )
-    .run({ ...p, updated_at: now });
+  await getPool().query(
+    `UPDATE counters
+       SET last_event_at = $1,
+           last_event_label = $2,
+           last_event_source = $3,
+           status = 'live',
+           consecutive_failures = 0,
+           updated_at = $4
+     WHERE id = $5`,
+    [p.event_time, p.label, p.source, now, p.id],
+  );
 }
 
-export function setCounterPrevValue(id: string, json: string) {
-  getDb()
-    .prepare(
-      `UPDATE counters SET previous_value_json = ?, updated_at = ? WHERE id = ?`,
-    )
-    .run(json, new Date().toISOString(), id);
+export async function setCounterPrevValue(id: string, json: string): Promise<void> {
+  await ensureDb();
+  await getPool().query(
+    `UPDATE counters SET previous_value_json = $1, updated_at = $2 WHERE id = $3`,
+    [json, new Date().toISOString(), id],
+  );
 }
 
-export function setCounterBaseline(id: string, json: string) {
-  getDb()
-    .prepare(`UPDATE counters SET baseline_json = ?, updated_at = ? WHERE id = ?`)
-    .run(json, new Date().toISOString(), id);
+export async function setCounterBaseline(id: string, json: string): Promise<void> {
+  await ensureDb();
+  await getPool().query(
+    `UPDATE counters SET baseline_json = $1, updated_at = $2 WHERE id = $3`,
+    [json, new Date().toISOString(), id],
+  );
 }
 
-export function markFetchFailure(id: string) {
-  const row = getCounter(id);
+export async function markFetchFailure(id: string): Promise<void> {
+  const row = await getCounter(id);
   if (!row) return;
   const next = row.consecutive_failures + 1;
   const status: "live" | "frozen" = next >= 3 ? "frozen" : row.status;
-  getDb()
-    .prepare(
-      `UPDATE counters
-         SET consecutive_failures = ?, status = ?, updated_at = ?
-       WHERE id = ?`,
-    )
-    .run(next, status, new Date().toISOString(), id);
+  await ensureDb();
+  await getPool().query(
+    `UPDATE counters
+       SET consecutive_failures = $1, status = $2, updated_at = $3
+     WHERE id = $4`,
+    [next, status, new Date().toISOString(), id],
+  );
 }
 
-export function markFetchSuccess(id: string) {
-  getDb()
-    .prepare(
-      `UPDATE counters
-         SET consecutive_failures = 0, status = 'live', updated_at = ?
-       WHERE id = ?`,
-    )
-    .run(new Date().toISOString(), id);
+export async function markFetchSuccess(id: string): Promise<void> {
+  await ensureDb();
+  await getPool().query(
+    `UPDATE counters
+       SET consecutive_failures = 0, status = 'live', updated_at = $1
+     WHERE id = $2`,
+    [new Date().toISOString(), id],
+  );
 }
 
 // ---------- events ----------
 
-export function insertEvent(e: {
-  counter_id: string;
-  scope: string | null;
-  event_time: string;
-  label: string;
-  sources: string[];
-  fingerprint: string;
-}) {
+export async function insertEvent(
+  e: {
+    counter_id: string;
+    scope: string | null;
+    event_time: string;
+    label: string;
+    sources: string[];
+    fingerprint: string;
+  },
+  db?: Sql,
+): Promise<void> {
+  await ensureDb();
+  const sql = db ?? getPool();
   const now = new Date().toISOString();
-  getDb()
-    .prepare(
-      `INSERT INTO events_log
-         (counter_id, scope, event_time, label, sources, fingerprint, created_at)
-       VALUES
-         (@counter_id, @scope, @event_time, @label, @sources, @fingerprint, @created_at)`,
-    )
-    .run({
-      counter_id: e.counter_id,
-      scope: e.scope,
-      event_time: e.event_time,
-      label: e.label,
-      sources: JSON.stringify(e.sources),
-      fingerprint: e.fingerprint,
-      created_at: now,
-    });
+  await sql.query(
+    `INSERT INTO events_log
+       (counter_id, scope, event_time, label, sources, fingerprint, created_at)
+     VALUES
+       ($1, $2, $3, $4, $5, $6, $7)`,
+    [
+      e.counter_id,
+      e.scope,
+      e.event_time,
+      e.label,
+      JSON.stringify(e.sources),
+      e.fingerprint,
+      now,
+    ],
+  );
 }
 
-export function eventFingerprintExists(fp: string): boolean {
-  const row = getDb()
-    .prepare("SELECT 1 FROM events_log WHERE fingerprint = ?")
-    .get(fp);
-  return !!row;
+export async function eventFingerprintExists(
+  fp: string,
+  db?: Sql,
+): Promise<boolean> {
+  await ensureDb();
+  const sql = db ?? getPool();
+  const r = await sql.query(
+    "SELECT 1 AS x FROM events_log WHERE fingerprint = $1 LIMIT 1",
+    [fp],
+  );
+  return r.rows.length > 0;
 }
 
-export function listEventsForCounter(counterId: string, limit = 100): EventRow[] {
-  return getDb()
-    .prepare(
-      `SELECT * FROM events_log
-        WHERE counter_id = ?
-        ORDER BY event_time DESC
-        LIMIT ?`,
-    )
-    .all(counterId, limit) as EventRow[];
+export async function listEventsForCounter(
+  counterId: string,
+  limit = 100,
+): Promise<EventRow[]> {
+  await ensureDb();
+  const r = await getPool().query(
+    `SELECT * FROM events_log
+      WHERE counter_id = $1
+      ORDER BY event_time DESC
+      LIMIT $2`,
+    [counterId, limit],
+  );
+  return r.rows as EventRow[];
 }
 
-export function listRecentEvents(limit = 30): EventRow[] {
-  return getDb()
-    .prepare(
-      `SELECT * FROM events_log ORDER BY event_time DESC LIMIT ?`,
-    )
-    .all(limit) as EventRow[];
+export async function listRecentEvents(limit = 30): Promise<EventRow[]> {
+  await ensureDb();
+  const r = await getPool().query(
+    `SELECT * FROM events_log ORDER BY event_time DESC LIMIT $1`,
+    [limit],
+  );
+  return r.rows as EventRow[];
 }
 
-export function countEventsSince(counterId: string, sinceIso: string): number {
-  const row = getDb()
-    .prepare(
-      `SELECT COUNT(*) AS n FROM events_log
-        WHERE counter_id = ? AND event_time >= ?`,
-    )
-    .get(counterId, sinceIso) as { n: number };
+export async function countEventsSince(
+  counterId: string,
+  sinceIso: string,
+  db?: Sql,
+): Promise<number> {
+  await ensureDb();
+  const sql = db ?? getPool();
+  const r = await sql.query(
+    `SELECT COUNT(*)::int AS n FROM events_log
+      WHERE counter_id = $1 AND event_time >= $2`,
+    [counterId, sinceIso],
+  );
+  const row = r.rows[0] as { n: number } | undefined;
   return row?.n ?? 0;
 }
 
 // ---------- pending events ----------
 
-export function insertPendingEvent(p: {
+export async function insertPendingEvent(p: {
   counter_id: string;
   scope: string | null;
   candidate_event_time: string;
   label: string;
   sources: string[];
   fingerprint: string;
-}) {
+}): Promise<void> {
+  await ensureDb();
   const now = new Date().toISOString();
   try {
-    getDb()
-      .prepare(
-        `INSERT INTO pending_events
-           (counter_id, scope, candidate_event_time, label, sources, fingerprint,
-            status, created_at)
-         VALUES
-           (@counter_id, @scope, @candidate_event_time, @label, @sources, @fingerprint,
-            'pending', @created_at)`,
-      )
-      .run({
-        counter_id: p.counter_id,
-        scope: p.scope,
-        candidate_event_time: p.candidate_event_time,
-        label: p.label,
-        sources: JSON.stringify(p.sources),
-        fingerprint: p.fingerprint,
-        created_at: now,
-      });
+    await getPool().query(
+      `INSERT INTO pending_events
+         (counter_id, scope, candidate_event_time, label, sources, fingerprint,
+          status, created_at)
+       VALUES
+         ($1, $2, $3, $4, $5, $6, 'pending', $7)`,
+      [
+        p.counter_id,
+        p.scope,
+        p.candidate_event_time,
+        p.label,
+        JSON.stringify(p.sources),
+        p.fingerprint,
+        now,
+      ],
+    );
   } catch (err: unknown) {
-    const e = err as { code?: string };
-    if (e.code !== "SQLITE_CONSTRAINT_UNIQUE") throw err;
+    if (!pgUniqueViolation(err)) throw err;
   }
 }
 
-export function pendingFingerprintExists(fp: string): boolean {
-  const row = getDb()
-    .prepare("SELECT 1 FROM pending_events WHERE fingerprint = ?")
-    .get(fp);
-  return !!row;
+export async function pendingFingerprintExists(fp: string): Promise<boolean> {
+  await ensureDb();
+  const r = await getPool().query(
+    "SELECT 1 AS x FROM pending_events WHERE fingerprint = $1 LIMIT 1",
+    [fp],
+  );
+  return r.rows.length > 0;
 }
 
-export function listPending(limit = 50): PendingEventRow[] {
-  return getDb()
-    .prepare(
-      `SELECT * FROM pending_events
-        WHERE status = 'pending'
-        ORDER BY created_at DESC
-        LIMIT ?`,
-    )
-    .all(limit) as PendingEventRow[];
+export async function listPending(limit = 50): Promise<PendingEventRow[]> {
+  await ensureDb();
+  const r = await getPool().query(
+    `SELECT * FROM pending_events
+      WHERE status = 'pending'
+      ORDER BY created_at DESC
+      LIMIT $1`,
+    [limit],
+  );
+  return r.rows as PendingEventRow[];
 }
 
-export function getPending(id: number): PendingEventRow | undefined {
-  return getDb()
-    .prepare("SELECT * FROM pending_events WHERE id = ?")
-    .get(id) as PendingEventRow | undefined;
+export async function getPending(id: number): Promise<PendingEventRow | undefined> {
+  await ensureDb();
+  const r = await getPool().query(
+    "SELECT * FROM pending_events WHERE id = $1",
+    [id],
+  );
+  return (r.rows[0] as PendingEventRow | undefined) ?? undefined;
 }
 
-export function decidePending(id: number, status: "approved" | "rejected", by: string) {
-  getDb()
-    .prepare(
-      `UPDATE pending_events
-         SET status = ?, approved_by = ?, decided_at = ?
-       WHERE id = ?`,
-    )
-    .run(status, by, new Date().toISOString(), id);
+export async function decidePending(
+  id: number,
+  status: "approved" | "rejected",
+  by: string,
+  db?: Sql,
+): Promise<void> {
+  await ensureDb();
+  const sql = db ?? getPool();
+  await sql.query(
+    `UPDATE pending_events
+       SET status = $1, approved_by = $2, decided_at = $3
+     WHERE id = $4`,
+    [status, by, new Date().toISOString(), id],
+  );
 }
 
 // ---------- fetch log ----------
 
-export function logFetch(p: {
+export async function logFetch(p: {
   counter_id: string;
   started_at: string;
   ok: boolean;
   error?: string | null;
   duration_ms: number;
-}) {
-  getDb()
-    .prepare(
-      `INSERT INTO fetch_log
-         (counter_id, started_at, ok, error, duration_ms)
-       VALUES (?, ?, ?, ?, ?)`,
-    )
-    .run(
+}): Promise<void> {
+  await ensureDb();
+  await getPool().query(
+    `INSERT INTO fetch_log
+       (counter_id, started_at, ok, error, duration_ms)
+     VALUES ($1, $2, $3, $4, $5)`,
+    [
       p.counter_id,
       p.started_at,
       p.ok ? 1 : 0,
       p.error ?? null,
       p.duration_ms,
-    );
+    ],
+  );
 }
 
-export function recentFetchHealth(hours = 1): Array<{
-  counter_id: string;
-  ok_count: number;
-  fail_count: number;
-  last_started_at: string;
-}> {
-  return getDb()
-    .prepare(
-      `SELECT
-         counter_id,
-         SUM(ok) AS ok_count,
-         SUM(1 - ok) AS fail_count,
-         MAX(started_at) AS last_started_at
-       FROM fetch_log
-       WHERE started_at >= datetime('now', ?)
-       GROUP BY counter_id
-       ORDER BY counter_id`,
-    )
-    .all(`-${hours} hours`) as Array<{
+export async function recentFetchHealth(hours = 1): Promise<
+  Array<{
+    counter_id: string;
+    ok_count: number;
+    fail_count: number;
+    last_started_at: string;
+  }>
+> {
+  await ensureDb();
+  const cutoff = new Date(Date.now() - hours * 3600 * 1000).toISOString();
+  const r = await getPool().query(
+    `SELECT
+       counter_id,
+       COALESCE(SUM(ok), 0)::int AS ok_count,
+       COALESCE(SUM(1 - ok), 0)::int AS fail_count,
+       MAX(started_at) AS last_started_at
+     FROM fetch_log
+     WHERE started_at >= $1
+     GROUP BY counter_id
+     ORDER BY counter_id`,
+    [cutoff],
+  );
+  return r.rows as Array<{
     counter_id: string;
     ok_count: number;
     fail_count: number;
@@ -386,96 +438,154 @@ export function recentFetchHealth(hours = 1): Array<{
 
 // ---------- admin settings ----------
 
-export function getAdminSetting(key: string): string | null {
-  const row = getDb()
-    .prepare("SELECT value FROM admin_settings WHERE key = ?")
-    .get(key) as { value: string } | undefined;
+export async function getAdminSetting(key: string): Promise<string | null> {
+  await ensureDb();
+  const r = await getPool().query(
+    "SELECT value FROM admin_settings WHERE key = $1",
+    [key],
+  );
+  const row = r.rows[0] as { value: string } | undefined;
   return row?.value ?? null;
 }
 
-export function setAdminSetting(key: string, value: string | null) {
+export async function setAdminSetting(key: string, value: string | null): Promise<void> {
+  await ensureDb();
   if (value == null) {
-    getDb().prepare("DELETE FROM admin_settings WHERE key = ?").run(key);
+    await getPool().query("DELETE FROM admin_settings WHERE key = $1", [key]);
     return;
   }
-  getDb()
-    .prepare(
-      `INSERT INTO admin_settings (key, value) VALUES (?, ?)
-       ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
-    )
-    .run(key, value);
+  await getPool().query(
+    `INSERT INTO admin_settings (key, value) VALUES ($1, $2)
+     ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`,
+    [key, value],
+  );
 }
 
 // ---------- alert subscriptions ----------
 
-export function insertAlertSubscription(p: {
+export async function insertAlertSubscription(p: {
   email: string;
   counter_id: string;
   confirm_token: string;
   unsub_token: string;
-}): { inserted: boolean; row: AlertSubscriptionRow | null } {
+}): Promise<{ inserted: boolean; row: AlertSubscriptionRow | null }> {
+  await ensureDb();
   const now = new Date().toISOString();
   try {
-    getDb()
-      .prepare(
-        `INSERT INTO alert_subscriptions
-           (email, counter_id, confirm_token, unsub_token, created_at)
-         VALUES (@email, @counter_id, @confirm_token, @unsub_token, @created_at)`,
-      )
-      .run({ ...p, created_at: now });
-    const row = getDb()
-      .prepare(
-        "SELECT * FROM alert_subscriptions WHERE email = ? AND counter_id = ?",
-      )
-      .get(p.email, p.counter_id) as AlertSubscriptionRow | undefined;
+    await getPool().query(
+      `INSERT INTO alert_subscriptions
+         (email, counter_id, confirm_token, unsub_token, created_at)
+       VALUES ($1, $2, $3, $4, $5)`,
+      [p.email, p.counter_id, p.confirm_token, p.unsub_token, now],
+    );
+    const r = await getPool().query(
+      "SELECT * FROM alert_subscriptions WHERE email = $1 AND counter_id = $2",
+      [p.email, p.counter_id],
+    );
+    const row = r.rows[0] as AlertSubscriptionRow | undefined;
     return { inserted: true, row: row ?? null };
   } catch (err: unknown) {
-    const e = err as { code?: string };
-    if (e.code === "SQLITE_CONSTRAINT_UNIQUE") {
-      const row = getDb()
-        .prepare(
-          "SELECT * FROM alert_subscriptions WHERE email = ? AND counter_id = ?",
-        )
-        .get(p.email, p.counter_id) as AlertSubscriptionRow | undefined;
-      return { inserted: false, row: row ?? null };
-    }
-    throw err;
+    if (!pgUniqueViolation(err)) throw err;
+    const r = await getPool().query(
+      "SELECT * FROM alert_subscriptions WHERE email = $1 AND counter_id = $2",
+      [p.email, p.counter_id],
+    );
+    const row = r.rows[0] as AlertSubscriptionRow | undefined;
+    return { inserted: false, row: row ?? null };
   }
 }
 
-export function getSubscriptionByConfirm(token: string): AlertSubscriptionRow | undefined {
-  return getDb()
-    .prepare("SELECT * FROM alert_subscriptions WHERE confirm_token = ?")
-    .get(token) as AlertSubscriptionRow | undefined;
+export async function getSubscriptionByConfirm(
+  token: string,
+): Promise<AlertSubscriptionRow | undefined> {
+  await ensureDb();
+  const r = await getPool().query(
+    "SELECT * FROM alert_subscriptions WHERE confirm_token = $1",
+    [token],
+  );
+  return (r.rows[0] as AlertSubscriptionRow | undefined) ?? undefined;
 }
 
-export function getSubscriptionByUnsub(token: string): AlertSubscriptionRow | undefined {
-  return getDb()
-    .prepare("SELECT * FROM alert_subscriptions WHERE unsub_token = ?")
-    .get(token) as AlertSubscriptionRow | undefined;
+export async function getSubscriptionByUnsub(
+  token: string,
+): Promise<AlertSubscriptionRow | undefined> {
+  await ensureDb();
+  const r = await getPool().query(
+    "SELECT * FROM alert_subscriptions WHERE unsub_token = $1",
+    [token],
+  );
+  return (r.rows[0] as AlertSubscriptionRow | undefined) ?? undefined;
 }
 
-export function confirmSubscription(id: number) {
-  getDb()
-    .prepare("UPDATE alert_subscriptions SET confirmed_at = ? WHERE id = ?")
-    .run(new Date().toISOString(), id);
+export async function confirmSubscription(id: number): Promise<void> {
+  await ensureDb();
+  await getPool().query(
+    "UPDATE alert_subscriptions SET confirmed_at = $1 WHERE id = $2",
+    [new Date().toISOString(), id],
+  );
 }
 
-export function deleteSubscription(id: number) {
-  getDb().prepare("DELETE FROM alert_subscriptions WHERE id = ?").run(id);
+export async function deleteSubscription(id: number): Promise<void> {
+  await ensureDb();
+  await getPool().query("DELETE FROM alert_subscriptions WHERE id = $1", [id]);
 }
 
-export function listConfirmedSubscribers(counterId: string): AlertSubscriptionRow[] {
-  return getDb()
-    .prepare(
-      `SELECT * FROM alert_subscriptions
-        WHERE counter_id = ? AND confirmed_at IS NOT NULL`,
-    )
-    .all(counterId) as AlertSubscriptionRow[];
+export async function listConfirmedSubscribers(
+  counterId: string,
+): Promise<AlertSubscriptionRow[]> {
+  await ensureDb();
+  const r = await getPool().query(
+    `SELECT * FROM alert_subscriptions
+      WHERE counter_id = $1 AND confirmed_at IS NOT NULL`,
+    [counterId],
+  );
+  return r.rows as AlertSubscriptionRow[];
 }
 
 // ---------- transaction helper ----------
 
-export function tx<T>(fn: () => T): T {
-  return getDb().transaction(fn)();
+export async function tx<T>(fn: (db: Sql) => Promise<T>): Promise<T> {
+  await ensureDb();
+  const p = getPool();
+  const client = await p.connect();
+  try {
+    await client.query("BEGIN");
+    const out = await fn(client);
+    await client.query("COMMIT");
+    return out;
+  } catch (e) {
+    await client.query("ROLLBACK");
+    throw e;
+  } finally {
+    client.release();
+  }
+}
+
+export async function updateCounterOnResetWithClient(
+  db: Sql,
+  p: { id: string; event_time: string; label: string; source: string },
+): Promise<void> {
+  const now = new Date().toISOString();
+  await db.query(
+    `UPDATE counters
+       SET last_event_at = $1,
+           last_event_label = $2,
+           last_event_source = $3,
+           status = 'live',
+           consecutive_failures = 0,
+           updated_at = $4
+     WHERE id = $5`,
+    [p.event_time, p.label, p.source, now, p.id],
+  );
+}
+
+export async function setCounterPrevValueWithClient(
+  db: Sql,
+  id: string,
+  json: string,
+): Promise<void> {
+  await db.query(
+    `UPDATE counters SET previous_value_json = $1, updated_at = $2 WHERE id = $3`,
+    [json, new Date().toISOString(), id],
+  );
 }

@@ -23,7 +23,7 @@ export function startAlertsWorker(): void {
 }
 
 async function dispatch(e: CounterChangeEvent) {
-  const subs = listConfirmedSubscribers(e.counterId);
+  const subs = await listConfirmedSubscribers(e.counterId);
   if (!subs.length) return;
 
   const def = COUNTERS_BY_ID[e.counterDefId];
@@ -69,7 +69,7 @@ async function dispatch(e: CounterChangeEvent) {
     else failed += 1;
   }
 
-  logFetch({
+  await logFetch({
     counter_id: "_alerts",
     started_at: new Date().toISOString(),
     ok: failed === 0,

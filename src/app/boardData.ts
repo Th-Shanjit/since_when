@@ -6,20 +6,20 @@ import {
 } from "@/config/counters";
 import { getAdminSetting, listCounters, type CounterRow } from "@/db/queries";
 import { daysSinceIst } from "@/core/time";
-import { getDb } from "@/db/client";
+import { ensureDb } from "@/db/client";
 import { ensureSeeded, seed } from "@/db/seed";
 
 export type BoardCounter = {
-  id: string;                 // scoped id e.g. "aqi#Delhi"
-  defId: string;              // "aqi"
-  scope: string | null;       // "Delhi"
+  id: string; // scoped id e.g. "aqi#Delhi"
+  defId: string; // "aqi"
+  scope: string | null; // "Delhi"
   title: string;
   subtitle: string;
   kind: "auto" | "queue" | "yearly";
   scopeKind: "city" | "service" | "exam" | null;
   scopeOptions: readonly string[];
-  daysSince: number | null;   // null for yearly
-  count: number | null;       // null for days-since
+  daysSince: number | null; // null for yearly
+  count: number | null; // null for days-since
   status: "live" | "frozen";
   lastEventAt: string | null;
   lastEventLabel: string | null;
@@ -62,10 +62,10 @@ function toBoard(
   };
 }
 
-export function loadBoard(): BoardCounter[] {
-  getDb();
-  seed();
-  const rows = listCounters();
+export async function loadBoard(): Promise<BoardCounter[]> {
+  await ensureDb();
+  await seed();
+  const rows = await listCounters();
   const byId = new Map(rows.map((r) => [r.id, r]));
 
   return COUNTERS.filter((c) => c.kind !== "special").map((def) => {
@@ -80,16 +80,16 @@ export function loadBoard(): BoardCounter[] {
 // the dropdown lists every allowed scope, but the bulk seed only writes
 // rows for defaultScope + explicit scopeSeeds, so previously-unseen
 // picks (e.g. "Chennai" for AQI) would otherwise return an empty tile.
-export function loadCounter(
+export async function loadCounter(
   defId: string,
   scope: string | null,
-): BoardCounter | null {
+): Promise<BoardCounter | null> {
   const def = COUNTERS_BY_ID[defId];
   if (!def) return null;
-  getDb();
-  ensureSeeded(defId, scope);
+  await ensureDb();
+  await ensureSeeded(defId, scope);
   const id = scopedId(def.id, scope);
-  const rows = listCounters();
+  const rows = await listCounters();
   const row = rows.find((r) => r.id === id);
   return toBoard(def, scope, row);
 }
@@ -99,18 +99,16 @@ export function loadCounter(
 // than "Delhi AQI at zero days" which is also visually noisy (scope city).
 const DEFAULT_HERO_ID = "internetShutdownOrders";
 
-export function pickHero(counters: BoardCounter[]): BoardCounter {
-  // Admin pin wins if it resolves.
-  const pinned = getAdminSetting("pinnedHeroId");
+export async function pickHero(
+  counters: BoardCounter[],
+): Promise<BoardCounter> {
+  const pinned = await getAdminSetting("pinnedHeroId");
   if (pinned) {
     const match = counters.find((c) => c.id === pinned);
     if (match) return match;
   }
-  // Default pin: the SFLC-tracked internet shutdowns tally.
   const defaultMatch = counters.find((c) => c.id === DEFAULT_HERO_ID);
   if (defaultMatch) return defaultMatch;
-  // Otherwise: most damning = smallest daysSince (yearly counters are
-  // sorted last since they have no "days since" comparison).
   return [...counters].sort((a, b) => {
     const aIsYearly = a.kind === "yearly";
     const bIsYearly = b.kind === "yearly";

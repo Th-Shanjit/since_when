@@ -5,8 +5,9 @@ import { QueueClient } from "./QueueClient";
 
 export const dynamic = "force-dynamic";
 
-export default function QueuePage() {
-  const pending = listPending(200).map((r) => ({
+export default async function QueuePage() {
+  const raw = await listPending(200);
+  const pending = raw.map((r) => ({
     id: r.id,
     counterId: r.counter_id,
     scope: r.scope,

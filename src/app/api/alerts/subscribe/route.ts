@@ -42,7 +42,7 @@ export async function POST(req: Request) {
   if (!isAllowedScope(def, scopeValue)) return bad("invalid_scope");
 
   const id = scopedId(counterId, scopeValue);
-  const result = insertAlertSubscription({
+  const result = await insertAlertSubscription({
     email: email.toLowerCase(),
     counter_id: id,
     confirm_token: token(),

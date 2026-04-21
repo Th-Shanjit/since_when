@@ -7,6 +7,6 @@ export const dynamic = "force-dynamic";
 // The client uses this mostly for cold-start hydration; per-tile scope
 // swaps hit /api/counter/:id?scope= instead.
 export async function GET() {
-  const counters = loadBoard();
+  const counters = await loadBoard();
   return json({ ok: true, counters });
 }

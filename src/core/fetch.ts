@@ -76,7 +76,7 @@ export async function politeFetch(
 
   const duration = Date.now() - started;
   try {
-    logFetch({
+    await logFetch({
       counter_id: opts.counterId,
       started_at: startedIso,
       ok: r.ok,
@@ -89,9 +89,9 @@ export async function politeFetch(
 
   if (!opts.passiveFailure) {
     if (r.ok) {
-      markFetchSuccess(opts.counterId);
+      await markFetchSuccess(opts.counterId);
     } else {
-      markFetchFailure(opts.counterId);
+      await markFetchFailure(opts.counterId);
       log.warn("fetch_failed", {
         counter_id: opts.counterId,
         url,

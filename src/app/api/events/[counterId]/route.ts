@@ -31,7 +31,8 @@ export async function GET(
     : 100;
 
   const id = scopedId(defId, scope);
-  const rows = listEventsForCounter(id, limit).map((r) => ({
+  const events = await listEventsForCounter(id, limit);
+  const rows = events.map((r) => ({
     id: r.id,
     counterId: r.counter_id,
     scope: r.scope,

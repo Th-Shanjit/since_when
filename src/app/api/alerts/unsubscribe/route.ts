@@ -11,8 +11,8 @@ export const dynamic = "force-dynamic";
 export async function GET(req: Request) {
   const url = new URL(req.url);
   const token = url.searchParams.get("token") ?? "";
-  const sub = token ? getSubscriptionByUnsub(token) : undefined;
-  if (sub) deleteSubscription(sub.id);
+  const sub = token ? await getSubscriptionByUnsub(token) : undefined;
+  if (sub) await deleteSubscription(sub.id);
 
   return new Response(
     `<!doctype html><html><head><meta charset="utf-8"><title>Since When</title>` +

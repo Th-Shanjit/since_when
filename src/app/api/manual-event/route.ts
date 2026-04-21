@@ -12,7 +12,7 @@ export async function POST(req: Request) {
   } catch {
     return bad("invalid_json");
   }
-  const r = handleManualEvent(body);
+  const r = await handleManualEvent(body);
   if (!r.ok) return bad(r.error, 400);
   const result = r.result;
   return json({ ok: true, result });

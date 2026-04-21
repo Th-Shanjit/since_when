@@ -32,7 +32,7 @@ export async function POST(req: Request) {
 
   const { counterId, scope } = parsed.data;
   if (counterId === null) {
-    setAdminSetting("pinnedHeroId", null);
+    await setAdminSetting("pinnedHeroId", null);
     return json({ ok: true, pinned: null });
   }
 
@@ -42,6 +42,6 @@ export async function POST(req: Request) {
   if (!isAllowedScope(def, scopeValue)) return bad("invalid_scope");
 
   const id = scopedId(counterId, scopeValue);
-  setAdminSetting("pinnedHeroId", id);
+  await setAdminSetting("pinnedHeroId", id);
   return json({ ok: true, pinned: id });
 }

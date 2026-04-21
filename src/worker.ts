@@ -9,15 +9,15 @@
 //      cause thundering-herd outbound requests on every deploy.
 
 import { log } from "@/core/logger";
-import { getDb, closeDb } from "@/db/client";
+import { closeDb, ensureDb } from "@/db/client";
 import { seed } from "@/db/seed";
 import { startScheduler } from "@/jobs/scheduler";
 import { runAllNow } from "@/jobs/runners";
 import { startAlertsWorker } from "@/jobs/alertsWorker";
 
 async function main() {
-  getDb();
-  seed();
+  await ensureDb();
+  await seed();
   startAlertsWorker();
 
   if (process.env.RUN_ON_BOOT === "true") {

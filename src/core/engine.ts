@@ -3,9 +3,10 @@ import {
   eventFingerprintExists,
   getCounter,
   insertEvent,
-  setCounterPrevValue,
+  setCounterPrevValueWithClient,
   tx,
-  updateCounterOnReset,
+  updateCounterOnResetWithClient,
+  type Sql,
 } from "@/db/queries";
 import { COUNTERS_BY_ID, scopedId } from "@/config/counters";
 import { hoursBetween, parseIso } from "./time";
@@ -36,26 +37,33 @@ export const COOLDOWN_HOURS = 24;
 // count. All yearly subtitles reference this year explicitly.
 export const YEAR_START_ISO = "2026-01-01T00:00:00Z";
 
+export type ProcessCounterOptions = {
+  /** When set (e.g. admin approval txn), all writes use this client — no nested txn. */
+  db?: Sql;
+};
+
 // Unified entry point. Every reset/increment in the system funnels through
 // here - cron, POST /api/manual-event, admin approve. The 5 rules below are
 // the spec's safety fence; yearly counters swap rules 3/4 for "event is not
 // older than YEAR_START and not already logged" and never cool down.
-export function processCounter(
+export async function processCounter(
   counterDefId: string,
   e: EventData,
   scope: string | null = null,
-): ProcessResult {
+  opts?: ProcessCounterOptions,
+): Promise<ProcessResult> {
+  const outer = opts?.db;
   const def = COUNTERS_BY_ID[counterDefId];
   const id = scopedId(counterDefId, scope);
 
   if (!e.isValidEvent) {
     return { action: "skip", counter_id: id, scope, reason: "invalid" };
   }
-  if (eventFingerprintExists(e.fingerprint)) {
+  if (await eventFingerprintExists(e.fingerprint, outer)) {
     return { action: "skip", counter_id: id, scope, reason: "dup" };
   }
 
-  const c = getCounter(id);
+  const c = await getCounter(id, outer);
   if (!c) {
     return { action: "skip", counter_id: id, scope, reason: "unknown_counter" };
   }
@@ -71,30 +79,44 @@ export function processCounter(
 
   // -------------------- yearly-kind: increment path --------------------
   if (def.kind === "yearly") {
-    // Only count events within the tallied year.
     if (parseIso(e.eventTime).getTime() < parseIso(YEAR_START_ISO).getTime()) {
       return { action: "skip", counter_id: id, scope, reason: "older" };
     }
     const primary = e.sources[0] ?? "";
     let newCount = 0;
-    tx(() => {
-      insertEvent({
-        counter_id: id,
-        scope,
-        event_time: e.eventTime,
-        label: e.label,
-        sources: e.sources,
-        fingerprint: e.fingerprint,
-      });
-      newCount = countEventsSince(id, YEAR_START_ISO);
-      setCounterPrevValue(id, JSON.stringify({ count: newCount }));
-      updateCounterOnReset({
+
+    const runYearly = async (db: Sql) => {
+      await insertEvent(
+        {
+          counter_id: id,
+          scope,
+          event_time: e.eventTime,
+          label: e.label,
+          sources: e.sources,
+          fingerprint: e.fingerprint,
+        },
+        db,
+      );
+      newCount = await countEventsSince(id, YEAR_START_ISO, db);
+      await setCounterPrevValueWithClient(
+        db,
+        id,
+        JSON.stringify({ count: newCount }),
+      );
+      await updateCounterOnResetWithClient(db, {
         id,
         event_time: e.eventTime,
         label: e.label,
         source: primary,
       });
-    });
+    };
+
+    if (outer) {
+      await runYearly(outer);
+    } else {
+      await tx(runYearly);
+    }
+
     log.info("yearly_increment", { counter_id: id, count: newCount, label: e.label });
     emitCounterChange({
       counterId: id,
@@ -120,22 +142,32 @@ export function processCounter(
   }
 
   const primarySource = e.sources[0] ?? "";
-  tx(() => {
-    insertEvent({
-      counter_id: id,
-      scope,
-      event_time: e.eventTime,
-      label: e.label,
-      sources: e.sources,
-      fingerprint: e.fingerprint,
-    });
-    updateCounterOnReset({
+
+  const runReset = async (db: Sql) => {
+    await insertEvent(
+      {
+        counter_id: id,
+        scope,
+        event_time: e.eventTime,
+        label: e.label,
+        sources: e.sources,
+        fingerprint: e.fingerprint,
+      },
+      db,
+    );
+    await updateCounterOnResetWithClient(db, {
       id,
       event_time: e.eventTime,
       label: e.label,
       source: primarySource,
     });
-  });
+  };
+
+  if (outer) {
+    await runReset(outer);
+  } else {
+    await tx(runReset);
+  }
 
   log.info("reset", { counter_id: id, label: e.label });
   emitCounterChange({

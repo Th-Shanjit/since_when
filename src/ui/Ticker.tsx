@@ -11,8 +11,8 @@ function hostnameOf(url: string) {
 
 // Dignified slow scroll. Two copies back-to-back so the keyframe can
 // animate -50% translate seamlessly.
-export function Ticker() {
-  const rows = listRecentEvents(24);
+export async function Ticker() {
+  const rows = await listRecentEvents(24);
   if (!rows.length) return null;
   const items = rows.map((r) => {
     const sources = (JSON.parse(r.sources) as string[])[0] ?? "";

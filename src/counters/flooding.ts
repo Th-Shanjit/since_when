@@ -31,8 +31,8 @@ export const flooding: CounterModule = {
     for (const g of groups) {
       const [city, date] = g.bucketKey.split("||");
       const fingerprint = fp.regionDate("flooding", city, date);
-      if (pendingFingerprintExists(fingerprint)) continue;
-      insertPendingEvent({
+      if (await pendingFingerprintExists(fingerprint)) continue;
+      await insertPendingEvent({
         counter_id: "flooding",
         scope: city,
         candidate_event_time: g.publishedAt,

@@ -86,7 +86,7 @@ function detectEvent(h: Hike, nowIso: string) {
 export const priceHike: CounterModule = {
   id: "priceHike",
   async run(): Promise<CounterRunResult> {
-    const row = getCounter("priceHike");
+    const row = await getCounter("priceHike");
     const prev: Snapshot = row?.previous_value_json
       ? (JSON.parse(row.previous_value_json) as Snapshot)
       : {};
@@ -109,7 +109,7 @@ export const priceHike: CounterModule = {
     }
 
     const hikes = diff(snap, prev, TRACKED_SERVICES);
-    setCounterPrevValue("priceHike", JSON.stringify(snap));
+    await setCounterPrevValue("priceHike", JSON.stringify(snap));
 
     if (!hikes.length) return { kind: "none", reason: "no_hike" };
 
@@ -121,7 +121,7 @@ export const priceHike: CounterModule = {
       const event = detectEvent(h, nowIso);
       last = {
         kind: "processed",
-        result: processCounter("priceHike", event, h.serviceLabel),
+        result: await processCounter("priceHike", event, h.serviceLabel),
       };
     }
     return last;

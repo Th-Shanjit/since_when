@@ -7,7 +7,7 @@ import {
   seedForScope,
   type CounterDef,
 } from "@/config/counters";
-import { getDb } from "./client";
+import { ensureDb, getPool } from "./client";
 import {
   eventFingerprintExists,
   getCounter,
@@ -31,10 +31,10 @@ function fpSeed(id: string) {
 //     has no DB row yet (e.g. picks "Chennai" for AQI). Lazy seeding uses
 //     the def's fallback seed, so the tile fills in immediately instead of
 //     showing "no event".
-export function seedOne(def: CounterDef, scope: string | null): void {
+export async function seedOne(def: CounterDef, scope: string | null): Promise<void> {
   const id = scopedId(def.id, scope);
 
-  upsertCounter({
+  await upsertCounter({
     id,
     counter_def_id: def.id,
     scope,
@@ -45,22 +45,22 @@ export function seedOne(def: CounterDef, scope: string | null): void {
 
   if (def.kind === "special") return;
 
-  const existing = getCounter(id);
+  const existing = await getCounter(id);
   const s = seedForScope(def, scope);
 
   // Yearly counters: seed a count directly without inserting a
   // placeholder event (the count is what matters, not the history).
   if (def.kind === "yearly") {
     if (!existing?.previous_value_json) {
-      setCounterPrevValue(id, JSON.stringify({ count: s.count ?? 0 }));
-      getDb()
-        .prepare(
-          `UPDATE counters
-             SET last_event_at = ?, last_event_label = ?, last_event_source = ?,
-                 first_event_at = COALESCE(first_event_at, ?)
-            WHERE id = ?`,
-        )
-        .run(s.event_time, s.label, s.source, s.event_time, id);
+      await setCounterPrevValue(id, JSON.stringify({ count: s.count ?? 0 }));
+      await ensureDb();
+      await getPool().query(
+        `UPDATE counters
+           SET last_event_at = $1, last_event_label = $2, last_event_source = $3,
+               first_event_at = COALESCE(first_event_at, $4)
+          WHERE id = $5`,
+        [s.event_time, s.label, s.source, s.event_time, id],
+      );
     }
     return;
   }
@@ -69,9 +69,9 @@ export function seedOne(def: CounterDef, scope: string | null): void {
   if (existing?.last_event_at) return;
 
   const fp = fpSeed(id);
-  if (eventFingerprintExists(fp)) return;
+  if (await eventFingerprintExists(fp)) return;
 
-  insertEvent({
+  await insertEvent({
     counter_id: id,
     scope,
     event_time: s.event_time,
@@ -79,40 +79,43 @@ export function seedOne(def: CounterDef, scope: string | null): void {
     sources: [s.source],
     fingerprint: fp,
   });
-  updateCounterOnReset({
+  await updateCounterOnReset({
     id,
     event_time: s.event_time,
     label: s.label,
     source: s.source,
   });
-  getDb()
-    .prepare(
-      "UPDATE counters SET first_event_at = ? WHERE id = ? AND first_event_at IS NULL",
-    )
-    .run(s.event_time, id);
+  await ensureDb();
+  await getPool().query(
+    "UPDATE counters SET first_event_at = $1 WHERE id = $2 AND first_event_at IS NULL",
+    [s.event_time, id],
+  );
 }
 
 // Ensure a scoped counter row + seed event exist for the given (defId,
 // scope). Returns false if the def/scope is unknown or not allowed.
-export function ensureSeeded(defId: string, scope: string | null): boolean {
+export async function ensureSeeded(
+  defId: string,
+  scope: string | null,
+): Promise<boolean> {
   const def = COUNTERS_BY_ID[defId];
   if (!def) return false;
   if (!isAllowedScope(def, scope)) return false;
   const id = scopedId(def.id, scope);
-  const existing = getCounter(id);
+  const existing = await getCounter(id);
   const alreadySeeded =
     def.kind === "yearly"
       ? !!existing?.previous_value_json
       : !!existing?.last_event_at;
   if (alreadySeeded) return true;
-  seedOne(def, scope);
+  await seedOne(def, scope);
   return true;
 }
 
-export function seed() {
+export async function seed(): Promise<void> {
   for (const def of COUNTERS) {
     for (const scope of scopesToSeed(def)) {
-      seedOne(def, scope);
+      await seedOne(def, scope);
     }
   }
 }
@@ -122,7 +125,13 @@ const isDirect =
   process.argv[1] &&
   process.argv[1].replace(/\\/g, "/").endsWith("src/db/seed.ts");
 if (isDirect) {
-  seed();
-  // eslint-disable-next-line no-console
-  console.log("[seed] ok - counters initialised");
+  void (async () => {
+    try {
+      await seed();
+      console.log("[seed] ok - counters initialised");
+    } catch (e) {
+      console.error("[seed] failed", e);
+      process.exit(1);
+    }
+  })();
 }

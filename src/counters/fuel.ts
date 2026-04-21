@@ -19,11 +19,6 @@ async function fetchData() {
   return politeFetch(IOCL_URL, { counterId: "fuel" });
 }
 
-function parseNumber(s: string): number | null {
-  const m = s.replace(/,/g, "").match(/(\d{2,3}(?:\.\d{1,2})?)/);
-  return m ? Number(m[1]) : null;
-}
-
 function normalize(html: string): Snapshot {
   const $ = cheerio.load(html);
   const text = $("body").text();
@@ -69,13 +64,13 @@ export const fuel: CounterModule = {
     if (snap.petrol == null && snap.diesel == null) {
       return { kind: "none", reason: "no_prices_parsed" };
     }
-    const row = getCounter("fuel");
+    const row = await getCounter("fuel");
     const prev: Prev = row?.previous_value_json
       ? (JSON.parse(row.previous_value_json) as Prev)
       : {};
     const event = detectEvent(snap, prev, new Date().toISOString());
     // Always persist the latest snapshot for next comparison.
-    setCounterPrevValue(
+    await setCounterPrevValue(
       "fuel",
       JSON.stringify({
         petrol: snap.petrol ?? prev.petrol ?? null,
@@ -83,6 +78,6 @@ export const fuel: CounterModule = {
       }),
     );
     if (!event) return { kind: "none", reason: "no_change" };
-    return { kind: "processed", result: processCounter("fuel", event) };
+    return { kind: "processed", result: await processCounter("fuel", event) };
   },
 };

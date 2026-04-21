@@ -80,7 +80,6 @@ export function CounterModal({ defId, scope, onClose }: Props) {
 
   // Fetch counter + last 6 events together.
   useEffect(() => {
-    setLoading(true);
     const qs = scope ? `?scope=${encodeURIComponent(scope)}` : "";
     Promise.all([
       fetch(`/api/counter/${encodeURIComponent(defId)}${qs}`, { cache: "no-store" }).then(
@@ -94,17 +93,14 @@ export function CounterModal({ defId, scope, onClose }: Props) {
       ),
     ])
       .then(([c, e]) => {
-        if (c.ok && c.counter) setCounter(c.counter);
+        if (c.ok && c.counter) {
+          setCounter(c.counter);
+          setWatched(readWatch().includes(c.counter.id));
+        }
         if (e.ok && e.events) setEvents(e.events);
       })
       .finally(() => setLoading(false));
   }, [defId, scope]);
-
-  // Watchlist state mirrors localStorage for the scoped id.
-  useEffect(() => {
-    if (!counter) return;
-    setWatched(readWatch().includes(counter.id));
-  }, [counter]);
 
   const [hero, ...rest] = events;
   const recent = rest.slice(0, 5);

@@ -6,7 +6,8 @@ export const dynamic = "force-dynamic";
 export async function GET(req: Request) {
   const ok = requireAdmin(req);
   if (ok !== true) return ok;
-  const rows = listPending(100).map((r) => ({
+  const pendingRows = await listPending(100);
+  const rows = pendingRows.map((r) => ({
     id: r.id,
     counterId: r.counter_id,
     candidateEventTime: r.candidate_event_time,

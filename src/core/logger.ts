@@ -10,7 +10,6 @@ function emit(level: Level, msg: string, meta?: Record<string, unknown>) {
     msg,
     ...(meta ?? {}),
   };
-  // eslint-disable-next-line no-console
   console[level === "error" ? "error" : level === "warn" ? "warn" : "log"](
     JSON.stringify(line),
   );

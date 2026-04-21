@@ -4,7 +4,7 @@ import { json } from "../_shared";
 export const dynamic = "force-dynamic";
 
 export async function GET() {
-  const rows = recentFetchHealth(1);
+  const rows = await recentFetchHealth(1);
   const now = new Date().toISOString();
   return json({
     ok: true,

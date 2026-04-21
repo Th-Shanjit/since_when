@@ -16,40 +16,9 @@ function hostnameOf(url: string | null) {
   }
 }
 
-export default function HomePage() {
-  // #region agent log
-  let counters: ReturnType<typeof loadBoard>;
-  try {
-    console.error(
-      "SINCEWHEN_DEBUG",
-      JSON.stringify({
-        hypothesisId: "H4",
-        location: "src/app/page.tsx:before_loadBoard",
-      }),
-    );
-    counters = loadBoard();
-    console.error(
-      "SINCEWHEN_DEBUG",
-      JSON.stringify({
-        hypothesisId: "H4",
-        location: "src/app/page.tsx:after_loadBoard",
-        count: counters.length,
-      }),
-    );
-  } catch (err) {
-    console.error(
-      "SINCEWHEN_DEBUG",
-      JSON.stringify({
-        hypothesisId: "H4",
-        location: "src/app/page.tsx:loadBoard_failed",
-        error: err instanceof Error ? err.message : String(err),
-        stack: err instanceof Error ? err.stack : undefined,
-      }),
-    );
-    throw err;
-  }
-  // #endregion
-  const hero = pickHero(counters);
+export default async function HomePage() {
+  const counters = await loadBoard();
+  const hero = await pickHero(counters);
   const heroIsYearly = hero.kind === "yearly";
 
   return (

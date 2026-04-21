@@ -1,4 +1,4 @@
-import { decidePending, getPending, insertEvent, tx } from "@/db/queries";
+import { decidePending, getPending, tx } from "@/db/queries";
 import { processCounter } from "@/core/engine";
 import { EventDataSchema } from "@/core/validate";
 import { json, bad, requireAdmin } from "../../../_shared";
@@ -30,11 +30,11 @@ export async function POST(
     return bad("invalid_action");
   }
 
-  const row = getPending(numId);
+  const row = await getPending(numId);
   if (!row || row.status !== "pending") return bad("not_pending", 404);
 
   if (action === "reject") {
-    decidePending(numId, "rejected", "admin");
+    await decidePending(numId, "rejected", "admin");
     return json({ ok: true, decided: "rejected" });
   }
 
@@ -49,9 +49,9 @@ export async function POST(
 
   // Atomic: mark decision + process the event inside one txn so a crash
   // in the middle cannot leave the queue approved but the counter untouched.
-  const result = tx(() => {
-    decidePending(numId, "approved", "admin");
-    return processCounter(row.counter_id, eventData, row.scope);
+  const result = await tx(async (db) => {
+    await decidePending(numId, "approved", "admin", db);
+    return await processCounter(row.counter_id, eventData, row.scope, { db });
   });
   return json({ ok: true, result });
 }

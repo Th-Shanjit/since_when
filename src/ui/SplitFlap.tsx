@@ -49,7 +49,7 @@ function Digit({
       const t = setTimeout(() => setFlipTo(value), delay);
       return () => clearTimeout(t);
     }
-    if (value !== current) setFlipTo(value);
+    if (value !== current) queueMicrotask(() => setFlipTo(value));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [value]);
 

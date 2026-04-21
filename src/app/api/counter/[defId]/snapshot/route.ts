@@ -27,7 +27,7 @@ export async function GET(
   const scope = scopeParam && scopeParam.length ? scopeParam : def.defaultScope;
   if (!isAllowedScope(def, scope)) return bad("invalid_scope", 400);
 
-  const c = loadCounter(defId, scope);
+  const c = await loadCounter(defId, scope);
   if (!c) return bad("not_found", 404);
 
   const value = c.kind === "yearly" ? String(c.count ?? 0) : String(c.daysSince ?? 0);

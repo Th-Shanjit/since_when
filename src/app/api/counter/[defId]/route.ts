@@ -22,7 +22,7 @@ export async function GET(
 
   if (!isAllowedScope(def, scope)) return bad("invalid_scope", 400);
 
-  const counter = loadCounter(defId, scope);
+  const counter = await loadCounter(defId, scope);
   if (!counter) return bad("not_found", 404);
 
   return json({ ok: true, counter });

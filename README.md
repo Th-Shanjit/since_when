@@ -14,8 +14,8 @@ This is **not a data scraper**. It's a deterministic event system:
 
 ## What's inside
 
-- **Next.js 15** (App Router, standalone) for the UI and public API.
-- **SQLite** via `better-sqlite3` - tiny, fast, no ORM.
+- **Next.js** (App Router, standalone) for the UI and public API.
+- **PostgreSQL** on [Neon](https://neon.tech) via `@neondatabase/serverless` (no ORM).
 - **`node-cron`** worker process pinned to `Asia/Kolkata`.
 - UI: Solari split-flap digits inside an industrial safety-sign frame. Pure
   CSS, no animation libs.
@@ -27,7 +27,7 @@ This is **not a data scraper**. It's a deterministic event system:
                 events bus, mailer
   /counters     counter modules (fetchData -> normalize -> detectEvent)
   /config       cities, services, exams, thresholds, counter registry
-  /db           schema.sql, better-sqlite3 client, queries, seed
+  /db           schema.pg.sql, Neon pool client, queries, seed
   /jobs         node-cron wiring, batch runners, alerts worker
   /manual       shared handler for manual + admin-approve paths
   /ui           SplitFlap, SafetySign, YearlyTile, CounterModal, ...
@@ -111,18 +111,15 @@ Send `{"counterId": null}` to clear the pin and return to auto-selection.
 npm install
 
 cp .env.example .env
-# edit .env: set ADMIN_TOKEN; optionally set RESEND_API_KEY and
+# edit .env: set DATABASE_URL (Neon), ADMIN_TOKEN; optionally RESEND_API_KEY and
 # NEXT_PUBLIC_DONATE_URL.
 
 npm run dev
 ```
 
-On first boot:
+On first boot (with `DATABASE_URL` set to your Neon connection string):
 
-- SQLite file `data/sincewhen.db` is created.
-- `schema.sql` is applied.
-- Idempotent `ALTER TABLE` migrations run for older DBs (adds `scope`
-  columns + the `admin_settings` and `alert_subscriptions` tables).
+- `schema.pg.sql` runs once per process (`CREATE TABLE IF NOT EXISTS`, indexes).
 - `seed.ts` inserts one plausible "first event" per (counter, scope) so
   the board lights up immediately.
 - Yearly counters seed a plausible YTD count (editable in
@@ -166,13 +163,14 @@ keeps a node server alive:
 
 ### Railway / Render / Fly
 
-Two processes, one shared volume:
+Two processes, one shared Neon database:
 
 - `web`    -> `npm run start:web`  (serves Next.js + hosts the alerts worker)
 - `worker` -> `npm run start:worker`  (runs node-cron)
-- volume   -> mount `./data` so both processes see the same SQLite file
-- env      -> `ADMIN_TOKEN`, `DB_PATH=/data/sincewhen.db`, `SITE_URL`,
-  `RESEND_API_KEY`, `ALERT_FROM_EMAIL`, `NEXT_PUBLIC_DONATE_URL`
+- env      -> `DATABASE_URL` (Neon pooled connection string), `ADMIN_TOKEN`,
+  `SITE_URL`, `RESEND_API_KEY`, `ALERT_FROM_EMAIL`, `NEXT_PUBLIC_DONATE_URL`
+
+Both processes must use the same `DATABASE_URL` so cron and the web app share state.
 
 ### Single VPS
 

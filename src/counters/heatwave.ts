@@ -81,7 +81,10 @@ export const heatwave: CounterModule = {
       if (seen.has(key)) continue;
       seen.add(key);
       const event = toEvent(h);
-      last = { kind: "processed", result: processCounter("heatwave", event, city) };
+      last = {
+        kind: "processed",
+        result: await processCounter("heatwave", event, city),
+      };
     }
     return last;
   },

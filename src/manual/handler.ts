@@ -12,7 +12,7 @@ export type ManualResult =
   | { ok: true; result: ProcessResult }
   | { ok: false; error: string };
 
-export function handleManualEvent(input: unknown): ManualResult {
+export async function handleManualEvent(input: unknown): Promise<ManualResult> {
   const parsed = ManualEventInputSchema.safeParse(input);
   if (!parsed.success) return { ok: false, error: "invalid_input" };
   const { counter_id, event_time, label, source_url, scope } = parsed.data;
@@ -40,6 +40,6 @@ export function handleManualEvent(input: unknown): ManualResult {
     fingerprint: fp,
   });
 
-  const result = processCounter(counter_id, eventData, scopeValue);
+  const result = await processCounter(counter_id, eventData, scopeValue);
   return { ok: true, result };
 }

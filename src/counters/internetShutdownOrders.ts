@@ -61,7 +61,7 @@ export const internetShutdownOrders: CounterModule = {
         sources: [SFLC_URL],
         fingerprint: fp.regionStartDate(s.region, date),
       });
-      const res = processCounter("internetShutdownOrders", event, null);
+      const res = await processCounter("internetShutdownOrders", event, null);
       if (res.action === "increment") fired += 1;
     }
 

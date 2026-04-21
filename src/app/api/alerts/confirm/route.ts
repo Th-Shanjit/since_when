@@ -12,10 +12,10 @@ export const dynamic = "force-dynamic";
 export async function GET(req: Request) {
   const url = new URL(req.url);
   const token = url.searchParams.get("token") ?? "";
-  const sub = token ? getSubscriptionByConfirm(token) : undefined;
+  const sub = token ? await getSubscriptionByConfirm(token) : undefined;
 
   if (!sub) return html(404, "Invalid or expired link.");
-  if (!sub.confirmed_at) confirmSubscription(sub.id);
+  if (!sub.confirmed_at) await confirmSubscription(sub.id);
 
   return html(
     200,

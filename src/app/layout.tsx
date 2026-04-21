@@ -13,7 +13,37 @@ import { startAlertsWorker } from "@/jobs/alertsWorker";
 // and admin approvals), so the alerts worker is started here too. The
 // module is a no-op if already started by src/worker.ts in the same
 // process, so double-starting is safe.
-startAlertsWorker();
+// #region agent log
+try {
+  console.error(
+    "SINCEWHEN_DEBUG",
+    JSON.stringify({
+      hypothesisId: "H3",
+      location: "src/app/layout.tsx:before_startAlertsWorker",
+      vercel: !!process.env.VERCEL,
+    }),
+  );
+  startAlertsWorker();
+  console.error(
+    "SINCEWHEN_DEBUG",
+    JSON.stringify({
+      hypothesisId: "H3",
+      location: "src/app/layout.tsx:after_startAlertsWorker",
+    }),
+  );
+} catch (err) {
+  console.error(
+    "SINCEWHEN_DEBUG",
+    JSON.stringify({
+      hypothesisId: "H3",
+      location: "src/app/layout.tsx:startAlertsWorker_failed",
+      error: err instanceof Error ? err.message : String(err),
+      stack: err instanceof Error ? err.stack : undefined,
+    }),
+  );
+  throw err;
+}
+// #endregion
 
 const bebas = Bebas_Neue({
   variable: "--font-bebas",

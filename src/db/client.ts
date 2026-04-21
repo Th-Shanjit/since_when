@@ -54,12 +54,86 @@ function migrate(db: Database.Database) {
 
 export function getDb(): Database.Database {
   if (_db) return _db;
-  ensureDir(DB_PATH);
-  _db = new Database(DB_PATH);
-  _db.pragma("journal_mode = WAL");
-  _db.pragma("foreign_keys = ON");
-  migrate(_db);
-  applySchema(_db);
+  // #region agent log
+  try {
+    console.error(
+      "SINCEWHEN_DEBUG",
+      JSON.stringify({
+        hypothesisId: "H1_H2",
+        location: "src/db/client.ts:getDb_enter",
+        dbPath: DB_PATH,
+        cwd: process.cwd(),
+        vercel: !!process.env.VERCEL,
+        nodeVersion: process.version,
+      }),
+    );
+    fetch(
+      "http://127.0.0.1:7501/ingest/5c255479-366d-4a87-a893-97d7a50d094a",
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-Debug-Session-Id": "746cbe",
+        },
+        body: JSON.stringify({
+          sessionId: "746cbe",
+          hypothesisId: "H1_H2",
+          location: "src/db/client.ts:getDb_enter",
+          message: "getDb_enter",
+          data: { dbPath: DB_PATH, cwd: process.cwd(), vercel: !!process.env.VERCEL },
+          timestamp: Date.now(),
+        }),
+      },
+    ).catch(() => {});
+  } catch {}
+  // #endregion
+  try {
+    ensureDir(DB_PATH);
+  } catch (err) {
+    console.error(
+      "SINCEWHEN_DEBUG",
+      JSON.stringify({
+        hypothesisId: "H2",
+        location: "src/db/client.ts:ensureDir_failed",
+        dbPath: DB_PATH,
+        error: err instanceof Error ? err.message : String(err),
+        code: (err as NodeJS.ErrnoException)?.code,
+      }),
+    );
+    throw err;
+  }
+  try {
+    _db = new Database(DB_PATH);
+  } catch (err) {
+    console.error(
+      "SINCEWHEN_DEBUG",
+      JSON.stringify({
+        hypothesisId: "H1",
+        location: "src/db/client.ts:new_Database_failed",
+        dbPath: DB_PATH,
+        error: err instanceof Error ? err.message : String(err),
+        code: (err as NodeJS.ErrnoException)?.code,
+      }),
+    );
+    throw err;
+  }
+  try {
+    _db.pragma("journal_mode = WAL");
+    _db.pragma("foreign_keys = ON");
+    migrate(_db);
+    applySchema(_db);
+  } catch (err) {
+    console.error(
+      "SINCEWHEN_DEBUG",
+      JSON.stringify({
+        hypothesisId: "H4",
+        location: "src/db/client.ts:schema_failed",
+        error: err instanceof Error ? err.message : String(err),
+        code: (err as NodeJS.ErrnoException)?.code,
+      }),
+    );
+    throw err;
+  }
   return _db;
 }
 

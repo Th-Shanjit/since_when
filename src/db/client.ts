@@ -1,6 +1,11 @@
-import { Pool } from "@neondatabase/serverless";
+import { Pool, neonConfig } from "@neondatabase/serverless";
 import fs from "node:fs";
 import path from "node:path";
+import ws from "ws";
+
+// Neon `Pool` + `connect()` use WebSockets. Node's built-in `WebSocket` (when
+// present) is not reliable for the driver's protocol — use the `ws` package.
+neonConfig.webSocketConstructor = ws;
 
 let pool: Pool | null = null;
 let ready: Promise<void> | null = null;

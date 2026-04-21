@@ -37,7 +37,16 @@ async function main() {
 
 main().catch((err) => {
   log.error("worker_fatal", {
-    error: err instanceof Error ? err.message : String(err),
+    error: formatWorkerError(err),
   });
   process.exit(1);
 });
+
+function formatWorkerError(err: unknown): string {
+  if (err instanceof Error) return err.stack ?? err.message;
+  if (err && typeof err === "object" && "message" in err) {
+    const m = (err as { message?: unknown }).message;
+    if (m != null) return String(m);
+  }
+  return String(err);
+}
